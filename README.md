@@ -1,6 +1,6 @@
 # Databricks Asset Bundles for Spark Connect Rust
 
-Get started with the template by either cloning this repo and running the following command
+Get started with the template by cloning this repo and running the following command
 
 ```
 databricks bundle init PATH_TO_CHECKOUT
@@ -9,7 +9,7 @@ databricks bundle init PATH_TO_CHECKOUT
 Or use this template directly with the following command 
 
 ```
-databricks bundle init git@github.com:sjrusso8/dab-template-rust-unoffical.git
+databricks bundle init git@github.com:sjrusso8/dab-template-rust-unofficial.git
 ```
 
 ## Background
