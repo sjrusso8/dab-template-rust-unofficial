@@ -1,0 +1,36 @@
+# The main job for {{.project_name}}.
+
+resources:
+  jobs:
+    {{.project_name}}_job:
+      name: {{.project_name}}_job
+
+      {{- if not is_service_principal}}
+
+      email_notifications:
+        on_failure:
+          - {{user_name}}
+
+      {{else}}
+
+      {{end -}}
+
+      tasks:
+        - task_key: whl_task
+          job_cluster_key: job_cluster
+          python_wheel_task:
+            entry_point: run-task
+            package_name: {{.project_name}}
+          libraries:
+            - whl: ../dist/*.whl
+
+      job_clusters:
+        - job_cluster_key: job_cluster
+          new_cluster:
+            spark_version: {{template "latest_lts_dbr_version"}}
+            node_type_id: {{smallest_node_type}}
+            data_security_mode: SINGLE_USER
+            single_user_name: {{user_name}}
+            autoscale:
+                min_workers: 1
+                max_workers: 4

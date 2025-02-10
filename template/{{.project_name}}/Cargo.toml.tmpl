@@ -1,0 +1,20 @@
+[package]
+name = "{{.project_name}}"
+version = "0.1.0"
+keywords = ["spark", "spark_connect"]
+readme = "README.md"
+edition = "2021"
+description = ""
+license = "Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "{{.project_name}}"
+crate-type = ["cdylib"]
+
+[dependencies]
+spark-connect-rs = { version = "0.0.2", features = ["tls"] }
+uuid = { version = "1.12" }
+
+pyo3 = {version = "0.23", features = ["extension-module", "abi3", "abi3-py310"]}
+pyo3-async-runtimes = { version = "0.23", features = ["tokio-runtime"] }

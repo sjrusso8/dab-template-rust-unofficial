@@ -1,0 +1,129 @@
+use std::collections::HashMap;
+use std::env;
+
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
+
+use spark_connect_rs::client::Config;
+use spark_connect_rs::functions::{avg, col};
+use spark_connect_rs::{SparkSession, SparkSessionBuilder};
+
+use uuid::Uuid;
+
+#[pyfunction]
+fn rust_task(py: Python) -> PyResult<Bound<PyAny>> {
+    let mut config = Config::new();
+    let mut headers = HashMap::new();
+
+    let token = env::var("DATABRICKS_API_TOKEN").ok();
+    let host = env::var("DATABRICKS_REMOTE_HOST").ok();
+    let cluster_id = env::var("DATABRICKS_SERVERLESS_CLUSTER_ID").ok();
+    let session_id = env::var("DATABRICKS_SERVERLESS_SESSION_ID").ok();
+    let affinity_key = env::var("DATABRICKS_SERVERLESS_AFFINITY").ok();
+
+    match (host, cluster_id, token, session_id, affinity_key) {
+        // Try to attach to to serverless mode if all required variables are present
+        (Some(host), Some(cluster_id), Some(token), Some(session_id), Some(affinity_key)) => {
+            headers.insert("x-databricks-session-id".to_string(), session_id.clone());
+            headers.insert("x-databricks-spark-affinity-key".to_string(), affinity_key);
+            headers.insert(
+                "x-databricks-metering-session-id".to_string(),
+                cluster_id.clone(),
+            );
+
+            config = config
+                .session_id(Uuid::parse_str(&session_id).expect("Failed to parse session ID"))
+                .host(&host)
+                .port(443)
+                .token(&token)
+                .use_ssl(true)
+                .headers(headers);
+        }
+
+        // Fail back to cluster and create a session ID
+        (Some(host), Some(cluster_id), Some(token), None, None) => {
+            let generated_session_id = Uuid::new_v4().to_string();
+            headers.insert("x-databricks-cluster-id".to_string(), cluster_id.clone());
+
+            config = config
+                .session_id(
+                    Uuid::parse_str(&generated_session_id).expect("Failed to generate session ID"),
+                )
+                .host(&host)
+                .port(443)
+                .token(&token)
+                .use_ssl(true)
+                .headers(headers);
+        }
+
+        // Missing required variables
+        _ => {
+            return Err(PyErr::new::<PyRuntimeError, _>(
+                "Missing required environment variables for Databricks configuration",
+            ));
+        }
+    }
+
+    pyo3_async_runtimes::tokio::future_into_py(py, async {
+        // connect the databricks cluster
+        let spark: SparkSession = SparkSessionBuilder::from_config(config)
+            .build()
+            .await
+            .expect("failed to connect to spark session");
+
+        // read unity catalog table
+        let df = spark
+            .read()
+            .table("samples.nyctaxi.trips", None)
+            .expect("failed to read table");
+
+        // apply a filter
+        let filter = "trip_distance BETWEEN 0 AND 10 AND fare_amount BETWEEN 0 AND 50";
+        let df = df.filter(filter);
+
+        // groupby the pickup
+        let df = df
+            .select(["pickup_zip", "fare_amount"])
+            .group_by(Some(["pickup_zip"]));
+
+        // average the fare amount and order by the top 10 zip codes
+        let df = df
+            .agg([avg(col("fare_amount")).alias("avg_fare_amount")])
+            .order_by([col("avg_fare_amount").desc()]);
+
+        df.show(Some(10), None, None)
+            .await
+            .expect("failed to show df");
+
+        // +---------------------------------+
+        // | show_string                     |
+        // +---------------------------------+
+        // | +----------+------------------+ |
+        // | |pickup_zip|avg_fare_amount   | |
+        // | +----------+------------------+ |
+        // | |7086      |40.0              | |
+        // | |7030      |40.0              | |
+        // | |11424     |34.25             | |
+        // | |7087      |31.0              | |
+        // | |10470     |28.0              | |
+        // | |11371     |25.532619926199263| |
+        // | |11375     |25.5              | |
+        // | |11370     |22.452380952380953| |
+        // | |11207     |20.5              | |
+        // | |11218     |20.0              | |
+        // | +----------+------------------+ |
+        // | only showing top 10 rows        |
+        // |                                 |
+        // +---------------------------------+
+
+        Ok(())
+    })
+}
+
+/// A Python module implemented in Rust.
+#[pymodule]
+#[pyo3(name = "_internal")]
+fn {{.project_name}}(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(rust_task, m)?)?;
+    Ok(())
+}
